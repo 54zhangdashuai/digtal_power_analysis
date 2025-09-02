@@ -13,6 +13,56 @@ class AnalysisMixin:
     """
     一个包含所有核心分析计算方法的Mixin类。
     """
+    ### MODIFICATION START: Add auto-detection algorithm ###
+    def _guess_transfer_function_order(self, freq, mag, phase):
+        """
+        根据伯德图数据自动猜测传递函数的阶数。
+        返回 (guessed_zeros, guessed_poles)。
+        """
+        try:
+            # 使用展开的相位以避免-180/180跳变问题
+            unwrapped_phase = np.unwrap(np.deg2rad(phase)) * 180 / np.pi
+            
+            # 1. 根据总相位偏移估算(极点数 - 零点数)
+            # 对于稳定的最小相位系统，总相位变化约为 (Z-P)*90度
+            # 我们从0度开始，所以 P-Z ≈ (start_phase - end_phase) / 90
+            total_phase_shift = unwrapped_phase[0] - unwrapped_phase[-1]
+            pole_zero_difference = int(round(total_phase_shift / 90.0))
+            
+            # 2. 根据相位的局部最小值(谷)来检测零点
+            # 零点会提供相位裕度提升，导致相位曲线出现一个谷底然后回升
+            # 我们寻找负的峰值，也就是谷
+            # prominence确保谷底是显著的
+            phase_valleys, _ = signal.find_peaks(-unwrapped_phase, prominence=10) # 10度的显著性
+            
+            guessed_zeros = 0
+            if len(phase_valleys) > 0:
+                for valley_idx in phase_valleys:
+                    # 检查谷底之后是否有显著的相位回升
+                    if valley_idx < len(unwrapped_phase) - 1:
+                        phase_after_valley = unwrapped_phase[valley_idx:]
+                        # 如果从谷底到最后的相位回升超过30度，我们认为这是一个零点
+                        if (phase_after_valley[-1] - phase_after_valley[0]) > 30:
+                            guessed_zeros += 1
+
+            # 3. 结合信息计算最终阶数
+            guessed_poles = guessed_zeros + pole_zero_difference
+
+            # 4. 合理性检查 (根据数字电源常见模型进行约束)
+            if guessed_poles < 1: guessed_poles = 1
+            if guessed_poles > 4: guessed_poles = 4 # 限制最大阶数
+            if guessed_zeros > 2: guessed_zeros = 2 # 限制最大零点数
+            if guessed_zeros >= guessed_poles: guessed_zeros = guessed_poles - 1
+
+            return max(0, guessed_zeros), guessed_poles
+
+        except Exception as e:
+            print(f"自动检测阶数失败: {e}")
+            # 返回一个安全的默认值
+            return 0, 2
+    ### MODIFICATION END ###
+
+
     def _calculate_bode_metrics(self, freq, mag, phase):
         metrics = {'pm': np.nan, 'gm': np.nan, 'wc_gc': None, 'wc_pc': None, 'bw': None, 'mr': np.nan}
         try:
@@ -259,53 +309,49 @@ class AnalysisMixin:
             QMessageBox.critical(self, "计算错误", f"无法生成Bode图：\n{e}")
 
     def analyze_bode_plot(self):
+        """主分析函数，集成了自动检测逻辑。"""
+        # 1. 获取数据 (重用上一版已优化的数据获取逻辑)
         mode = self.bode_col_select_mode.currentText()
         df = self.data
         if df is None or df.empty: 
             QMessageBox.warning(self, "无数据", "请先加载一个数据文件。"); return
-            
         try:
+            freq_col_name = ""
             if mode == "按名称":
                 freq_col, gain_col, phase_col = self.bode_freq_combo.currentText(), self.bode_gain_combo.currentText(), self.bode_phase_combo.currentText()
-                cols_to_check = [freq_col, gain_col, phase_col]
-                if not all(cols_to_check) or any(c not in df.columns for c in cols_to_check):
+                if not all([freq_col, gain_col, phase_col]) or any(c not in df.columns for c in [freq_col, gain_col, phase_col]):
                     QMessageBox.warning(self, "列选择错误", "请为频率、增益和相位选择有效的列名。"); return
-                df_aligned = self.align_numeric_df(cols_to_check).sort_values(by=freq_col)
-                freq, gain, phase = df_aligned[freq_col].values, df_aligned[gain_col].values, df_aligned[phase_col].values
+                df_aligned = self.align_numeric_df([freq_col, gain_col, phase_col]).sort_values(by=freq_col)
+                freq_col_name = freq_col
             else: # 按位置
                 f_idx, g_idx, p_idx = self.bode_freq_combo.currentIndex(), self.bode_gain_combo.currentIndex(), self.bode_phase_combo.currentIndex()
                 if any(i < 0 for i in [f_idx, g_idx, p_idx]) or max(f_idx, g_idx, p_idx) >= len(df.columns):
                     QMessageBox.warning(self, "列位置错误", "选择的列位置超出了数据范围。"); return
-                df_aligned = self.align_numeric_df(list(df.columns[[f_idx, g_idx, p_idx]])).sort_values(by=df.columns[f_idx])
-                freq, gain, phase = df_aligned.iloc[:,0].values, df_aligned.iloc[:,1].values, df_aligned.iloc[:,2].values
-            
-            if len(freq) < 5: 
-                QMessageBox.warning(self, "数据不足", "有效数据点过少，无法进行分析。"); return
-            
-            self.clear_plot(show_message=False)
-            metrics = self._calculate_bode_metrics(freq, gain, phase)
-            self._report_bode_metrics(metrics, title=f"实测数据分析: {self.current_file}")
-            name = f"实测数据 ({self.current_file or ''})"
-            self.plot_bode(freq, gain, phase, name=name, clear_plot=False, metrics=metrics)
-            
-            if self.fitting_group.isChecked():
-                self.statusBar().showMessage("正在执行传递函数拟合，请稍候..."); self.QApplication.processEvents()
-                num_z, num_p = self.fit_zeros_spin.value(), self.fit_poles_spin.value()
-                fitted_tf, error = self._fit_transfer_function(freq, gain, phase, num_z, num_p)
-                if fitted_tf:
-                    w_fit, mag_fit, phase_fit = signal.bode(fitted_tf, w=2*np.pi*freq)
-                    self.plot_bode(freq, mag_fit, phase_fit, name="拟合传递函数", clear_plot=False)
-                    report = self.result_text.toPlainText()
-                    report += f"\n\n======= 传递函数拟合结果 ({num_z}Z, {num_p}P) =======\n"
-                    report += f"分子系数: {np.array2string(fitted_tf.num, formatter={'float_kind':lambda x: '%.4g' % x})}\n"
-                    report += f"分母系数: {np.array2string(fitted_tf.den, formatter={'float_kind':lambda x: '%.4g' % x})}"
-                    self.show_text(report)
-                else:
-                    QMessageBox.warning(self, "拟合失败", f"无法拟合传递函数: {error}")
+                selected_cols = list(df.columns[[f_idx, g_idx, p_idx]])
+                freq_col_name = selected_cols[0]
+                df_aligned = self.align_numeric_df(selected_cols).sort_values(by=freq_col_name)
 
-            self.statusBar().showMessage("Bode图分析完成")
+            df_aligned = df_aligned[df_aligned[freq_col_name] > 0]
+            if df_aligned.shape[0] < 5:
+                QMessageBox.warning(self, "数据不足", "有效数据点过少(少于5个)，无法进行分析。"); return
+
+            freq, gain, phase = df_aligned.iloc[:,0].values, df_aligned.iloc[:,1].values, df_aligned.iloc[:,2].values
         except Exception as e:
-            QMessageBox.critical(self, "分析错误", f"处理Bode图时发生错误: {e}")
+            QMessageBox.critical(self, "数据处理错误", f"提取伯德图数据时出错: {e}"); return
+            
+        # 2. 绘制原始伯德图
+        self.clear_plot(show_message=False)
+        metrics = self._calculate_bode_metrics(freq, gain, phase)
+        self._report_bode_metrics(metrics, title=f"实测数据分析: {self.current_file}")
+        name = f"实测数据 ({self.current_file or ''})"
+        self.plot_bode(freq, gain, phase, name=name, clear_plot=False, metrics=metrics)
+        
+        # 3. 如果勾选了拟合，则调用拟合函数 (该函数内部会处理是否自动检测)
+        if self.fitting_group.isChecked():
+            self._perform_tf_fit(freq, gain, phase)
+        else:
+            self.statusBar().showMessage("Bode图分析完成")
+
 
     def _report_bode_metrics(self, metrics, title="伯德图分析报告"):
         report = f"======= {title} =======\n\n"

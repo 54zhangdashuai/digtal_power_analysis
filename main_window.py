@@ -35,7 +35,8 @@ class DataAnalysisApp(QMainWindow, UiSetupMixin, AnalysisMixin):
         self.loaded_files = {}
         self.last_table_df = None
         self.plotted_traces = [] # 用于管理叠加绘图
-        
+        self.current_bode_data = None # 新增：用于存储当前伯德图数据   
+
         # --- 理论设计模块的状态变量 ---
         self.compensator_results = {}
         self.current_compensator_tf = None
@@ -80,8 +81,6 @@ class DataAnalysisApp(QMainWindow, UiSetupMixin, AnalysisMixin):
         """集中连接所有UI控件的信号到对应的处理函数(槽)"""
         # --- 主选项卡切换 ---
         self.main_tabs.currentChanged.connect(self._update_action_buttons_state)
-
-        # --- 数据分析页 ---
         self.btn_open_files.clicked.connect(self.open_files)
         self.btn_open_folder.clicked.connect(self.open_folder)
         self.file_list.currentRowChanged.connect(self.switch_file)
@@ -98,12 +97,8 @@ class DataAnalysisApp(QMainWindow, UiSetupMixin, AnalysisMixin):
         self.fft_auto_fs_check.stateChanged.connect(lambda state: self.fft_fs_spin.setEnabled(not state))
         self.btn_analyze.clicked.connect(self.analyze_data)
         self.btn_show_osc.clicked.connect(self.show_oscilloscope_view)
-        ### MODIFICATION START: Connect new widget signals ###
         self.no_header_check.stateChanged.connect(self.on_no_header_changed)
         self.bode_col_select_mode.currentIndexChanged.connect(self.on_bode_col_mode_change)
-        ### MODIFICATION END ###
-        
-        # --- 理论设计页 ---
         self.btn_calc_buck.clicked.connect(self.on_calculate_buck)
         self.btn_overlay_buck_bode.clicked.connect(self.on_overlay_buck_bode)
         self.btn_send_buck_tf.clicked.connect(self.on_send_tf_to_compensator)
@@ -115,8 +110,6 @@ class DataAnalysisApp(QMainWindow, UiSetupMixin, AnalysisMixin):
         self.btn_design_comp.clicked.connect(self.on_design_compensator)
         self.comp_c_code_selector.currentTextChanged.connect(self.on_c_code_format_change)
         self.btn_plot_comp_bode.clicked.connect(self.on_plot_compensator_bode)
-
-        # --- 通用功能与绘图区 ---
         self.btn_clear_plot.clicked.connect(self.clear_plot)
         self.btn_export.clicked.connect(self.export_excel)
         self.btn_save_fig.clicked.connect(self.save_figure)
@@ -129,13 +122,119 @@ class DataAnalysisApp(QMainWindow, UiSetupMixin, AnalysisMixin):
         self.btn_measure_rise_time.clicked.connect(self.on_measure_rise_time)
         self.btn_measure_fall_time.clicked.connect(self.on_measure_fall_time)
         self.btn_measure_frequency.clicked.connect(self.on_measure_frequency)
-
-        # --- ROI信号连接 ---
         self.roi_enable_check.stateChanged.connect(self.on_roi_enable_changed)
         self.btn_select_roi.clicked.connect(self.on_start_roi_selection)
         self.btn_clear_roi.clicked.connect(self.on_clear_roi)
         self.roi_xmin_spin.valueChanged.connect(self.on_roi_spinbox_changed)
         self.roi_xmax_spin.valueChanged.connect(self.on_roi_spinbox_changed)
+
+
+    def _get_bode_data_from_ui(self):
+        """从UI获取并验证用于伯德图分析的数据。"""
+        mode = self.bode_col_select_mode.currentText()
+        df = self.data
+        if df is None or df.empty: 
+            QMessageBox.warning(self, "无数据", "请先加载一个数据文件。")
+            return None, None, None
+            
+        try:
+            freq_col_name, gain_col_name, phase_col_name = None, None, None
+            if mode == "按名称":
+                freq_col, gain_col, phase_col = self.bode_freq_combo.currentText(), self.bode_gain_combo.currentText(), self.bode_phase_combo.currentText()
+                cols_to_check = [freq_col, gain_col, phase_col]
+                if not all(cols_to_check) or any(c not in df.columns for c in cols_to_check):
+                    QMessageBox.warning(self, "列选择错误", "请为频率、增益和相位选择有效的列名。")
+                    return None, None, None
+                df_aligned = self.align_numeric_df(cols_to_check).sort_values(by=freq_col)
+                freq_col_name = freq_col
+            else: # 按位置
+                f_idx, g_idx, p_idx = self.bode_freq_combo.currentIndex(), self.bode_gain_combo.currentIndex(), self.bode_phase_combo.currentIndex()
+                if any(i < 0 for i in [f_idx, g_idx, p_idx]) or max(f_idx, g_idx, p_idx) >= len(df.columns):
+                    QMessageBox.warning(self, "列位置错误", "选择的列位置超出了数据范围。")
+                    return None, None, None
+                
+                # 获取列名用于后续处理
+                selected_cols = list(df.columns[[f_idx, g_idx, p_idx]])
+                freq_col_name, gain_col_name, phase_col_name = selected_cols[0], selected_cols[1], selected_cols[2]
+                df_aligned = self.align_numeric_df(selected_cols).sort_values(by=freq_col_name)
+
+            ### MODIFICATION START: Filter out non-positive frequency values ###
+            # 这是解决对数坐标轴警告和绘图问题的关键
+            df_aligned = df_aligned[df_aligned[freq_col_name] > 0]
+            ### MODIFICATION END ###
+
+            return df_aligned.iloc[:,0].values, df_aligned.iloc[:,1].values, df_aligned.iloc[:,2].values
+
+        except Exception as e:
+            QMessageBox.critical(self, "数据处理错误", f"提取伯德图数据时出错: {e}")
+            return None, None, None
+
+    def on_auto_detect_and_fit(self):
+        """处理“自动检测并拟合”按钮的点击事件，使其成为一个完整、独立的操作。"""
+        self.statusBar().showMessage("正在获取数据并分析...")
+        self.QApplication.processEvents()
+        
+        freq, gain, phase = self._get_bode_data_from_ui()
+        if freq is None or len(freq) < 5:
+            if freq is not None: QMessageBox.warning(self, "数据不足", "有效数据点过少，无法进行分析。")
+            self.statusBar().showMessage("操作取消")
+            return
+
+        # 绘制原始伯德图
+        self.clear_plot(show_message=False)
+        metrics = self._calculate_bode_metrics(freq, gain, phase)
+        self._report_bode_metrics(metrics, title=f"实测数据分析: {self.current_file}")
+        name = f"实测数据 ({self.current_file or ''})"
+        self.plot_bode(freq, gain, phase, name=name, clear_plot=False, metrics=metrics)
+        
+        # 自动检测阶数
+        self.statusBar().showMessage("正在自动检测阶数...")
+        self.QApplication.processEvents()
+        num_z, num_p = self._guess_transfer_function_order(freq, gain, phase)
+        
+        # 更新UI
+        self.fit_zeros_spin.setValue(num_z)
+        self.fit_poles_spin.setValue(num_p)
+        
+        self.statusBar().showMessage(f"检测到 {num_z} 个零点, {num_p} 个极点。正在执行拟合...")
+        self.QApplication.processEvents()
+        
+        # 执行拟合
+        self._perform_tf_fit(freq, gain, phase)
+
+
+
+
+
+    def _perform_tf_fit(self, freq, gain, phase):
+        """执行传递函数拟合的通用函数。"""
+        # 如果启用了自动检测，则先进行检测并更新UI
+        if self.auto_detect_order_check.isChecked():
+            self.statusBar().showMessage("正在自动检测阶数...")
+            self.QApplication.processEvents()
+            num_z, num_p = self._guess_transfer_function_order(freq, gain, phase)
+            self.fit_zeros_spin.setValue(num_z)
+            self.fit_poles_spin.setValue(num_p)
+            self.statusBar().showMessage(f"检测到 {num_z}Z, {num_p}P。正在执行拟合...")
+            self.QApplication.processEvents()
+
+        # 使用UI上的（可能是刚更新的）零极点数进行拟合
+        num_z, num_p = self.fit_zeros_spin.value(), self.fit_poles_spin.value()
+        fitted_tf, error = self._fit_transfer_function(freq, gain, phase, num_z, num_p)
+
+        if fitted_tf:
+            report = self.result_text.toPlainText().split("\n\n======= 传递函数拟合结果")[0]
+            w_fit, mag_fit, phase_fit = signal.bode(fitted_tf, w=2 * np.pi * freq)
+            self.plot_bode(freq, mag_fit, phase_fit, name="拟合传递函数", clear_plot=False)
+            
+            report += f"\n\n======= 传递函数拟合结果 ({num_z}Z, {num_p}P) =======\n"
+            report += f"分子系数: {np.array2string(fitted_tf.num, formatter={'float_kind':lambda x: '%.4g' % x})}\n"
+            report += f"分母系数: {np.array2string(fitted_tf.den, formatter={'float_kind':lambda x: '%.4g' % x})}"
+            self.show_text(report)
+            self.statusBar().showMessage("拟合完成。")
+        else:
+            QMessageBox.warning(self, "拟合失败", f"无法拟合传递函数: {error}")
+            self.statusBar().showMessage("拟合失败。")
 
     # --- ROI处理方法 (保持不变) ---
     def on_roi_enable_changed(self, state):

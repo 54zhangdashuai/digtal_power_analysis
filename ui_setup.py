@@ -38,6 +38,52 @@ class UiSetupMixin:
         
         self.statusBar().showMessage("准备就绪")
 
+    def _create_bode_param_widget(self):
+        widget = QWidget()
+        main_layout = QVBoxLayout(widget)
+        main_layout.setContentsMargins(0, 5, 0, 5)
+
+        selection_group = QGroupBox("数据列选择")
+        layout = QFormLayout(selection_group)
+        layout.setContentsMargins(5, 10, 5, 10)
+        
+        self.bode_col_select_mode = QComboBox()
+        self.bode_col_select_mode.addItems(["按名称", "按位置"])
+        self.bode_col_select_mode.setCurrentIndex(1)
+        layout.addRow("列选择模式:", self.bode_col_select_mode)
+
+        self.bode_freq_combo = QComboBox()
+        self.bode_gain_combo = QComboBox()
+        self.bode_phase_combo = QComboBox()
+        layout.addRow("频率列 (Hz):", self.bode_freq_combo)
+        layout.addRow("增益列 (dB):", self.bode_gain_combo)
+        layout.addRow("相位列 (deg):", self.bode_phase_combo)
+        main_layout.addWidget(selection_group)
+
+        self.fitting_group = QGroupBox("传递函数拟合 (系统辨识)")
+        self.fitting_group.setCheckable(True)
+        self.fitting_group.setChecked(False)
+        
+        ### MODIFICATION START: Replace button with a checkbox ###
+        fit_layout = QFormLayout(self.fitting_group)
+        fit_layout.setContentsMargins(5, 10, 5, 10)
+        
+        # New checkbox to enable/disable auto-detection
+        self.auto_detect_order_check = QCheckBox("自动检测阶数")
+        self.auto_detect_order_check.setToolTip("勾选后，点击“执行分析”将自动检测阶数并拟合")
+        self.auto_detect_order_check.setChecked(True) # Default to being checked
+        fit_layout.addRow(self.auto_detect_order_check)
+
+        self.fit_zeros_spin = QSpinBox(); self.fit_zeros_spin.setRange(0, 10)
+        self.fit_poles_spin = QSpinBox(); self.fit_poles_spin.setRange(1, 10); self.fit_poles_spin.setValue(2)
+        fit_layout.addRow("零点数量:", self.fit_zeros_spin)
+        fit_layout.addRow("极点数量:", self.fit_poles_spin)
+        ### MODIFICATION END ###
+
+        main_layout.addWidget(self.fitting_group)
+        main_layout.addStretch()
+        return widget
+
     def _create_left_panel(self):
         left_panel_container = QWidget()
         content_layout = QVBoxLayout(left_panel_container)
@@ -432,36 +478,7 @@ class UiSetupMixin:
         self.transient_thresh_label = QLabel("稳态判定阈值 <")
         layout.addRow(self.transient_thresh_label, self.transient_thresh_spin)
         return widget
-    def _create_bode_param_widget(self):
-        widget = QWidget()
-        main_layout = QVBoxLayout(widget)
-        main_layout.setContentsMargins(0, 5, 0, 5)
-        selection_group = QGroupBox("数据列选择")
-        layout = QFormLayout(selection_group)
-        layout.setContentsMargins(5, 10, 5, 10)
-        self.bode_col_select_mode = QComboBox()
-        self.bode_col_select_mode.addItems(["按名称", "按位置"])
-        self.bode_col_select_mode.setCurrentIndex(1)
-        layout.addRow("列选择模式:", self.bode_col_select_mode)
-        self.bode_freq_combo = QComboBox()
-        self.bode_gain_combo = QComboBox()
-        self.bode_phase_combo = QComboBox()
-        layout.addRow("频率列 (Hz):", self.bode_freq_combo)
-        layout.addRow("增益列 (dB):", self.bode_gain_combo)
-        layout.addRow("相位列 (deg):", self.bode_phase_combo)
-        main_layout.addWidget(selection_group)
-        self.fitting_group = QGroupBox("传递函数拟合 (系统辨识)")
-        self.fitting_group.setCheckable(True)
-        self.fitting_group.setChecked(False)
-        fit_layout = QFormLayout(self.fitting_group)
-        fit_layout.setContentsMargins(5, 10, 5, 10)
-        self.fit_zeros_spin = QSpinBox(); self.fit_zeros_spin.setRange(0, 10)
-        self.fit_poles_spin = QSpinBox(); self.fit_poles_spin.setRange(1, 10); self.fit_poles_spin.setValue(2)
-        fit_layout.addRow("零点数量:", self.fit_zeros_spin)
-        fit_layout.addRow("极点数量:", self.fit_poles_spin)
-        main_layout.addWidget(self.fitting_group)
-        main_layout.addStretch()
-        return widget
+
     def _create_tf_bode_param_widget(self):
         widget = QWidget()
         layout = QFormLayout(widget)
