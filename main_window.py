@@ -498,21 +498,45 @@ class DataAnalysisApp(QMainWindow, UiSetupMixin, AnalysisMixin):
         ax1, ax2 = self.canvas_analysis.fig.axes
         freq_mouse = event.xdata
         if freq_mouse is None: return
+
         vline1 = ax1.axvline(freq_mouse, color='grey', linestyle=':', lw=1)
         vline2 = ax2.axvline(freq_mouse, color='grey', linestyle=':', lw=1)
         self.bode_tracker_annotations.extend([vline1, vline2])
-        for trace in self.plotted_traces:
-            if trace.get('type') != 'bode': continue
+
+        # Get only the Bode traces that are currently plotted
+        bode_traces = [t for t in self.plotted_traces if t.get('type') == 'bode']
+        
+        # Define a list of different offsets for the annotation boxes
+        offsets = [(15, 15), (15, -45), (20, 60), (20, -90)]
+
+        for i, trace in enumerate(bode_traces):
             freq_data = trace['data']['freq']
+            # Use searchsorted for efficiency on sorted frequency data
             idx = np.searchsorted(freq_data, freq_mouse)
             if idx >= len(freq_data): idx = len(freq_data) - 1
+            
             f, m, p = freq_data[idx], trace['data']['mag'][idx], trace['data']['phase'][idx]
+            
             text = f"{trace['name']}\nFreq: {f:.2f} Hz\nGain: {m:.2f} dB\nPhase: {p:.2f}°"
             target_ax, anchor_xy = (ax1, (f, m)) if event.inaxes == ax1 else (ax2, (f, p))
-            ann = target_ax.annotate(text, xy=anchor_xy, xytext=(15, 15), textcoords='offset points', bbox=dict(boxstyle="round,pad=0.5", fc=trace['lines'][0].get_color(), ec='black', lw=1, alpha=0.85), arrowprops=dict(arrowstyle="->", connectionstyle="arc3,rad=0.1"), fontsize=15)
+            
+            # Select a different offset for each trace to avoid overlap
+            offset = offsets[i % len(offsets)]
+            
+            ann = target_ax.annotate(
+                text, 
+                xy=anchor_xy, 
+                xytext=offset, 
+                textcoords='offset points', 
+                bbox=dict(boxstyle="round,pad=0.5", fc=trace['lines'][0].get_color(), ec='black', lw=1, alpha=0.85),
+                arrowprops=dict(arrowstyle="->", connectionstyle="arc3,rad=0.1"), 
+                fontsize=9  # Adjusted font size for better fit
+            )
+            
             hline1 = ax1.axhline(m, color=trace['lines'][0].get_color(), linestyle=':', lw=1, alpha=0.7)
             hline2 = ax2.axhline(p, color=trace['lines'][1].get_color(), linestyle=':', lw=1, alpha=0.7)
             self.bode_tracker_annotations.extend([ann, hline1, hline2])
+
         self.canvas_analysis.draw_idle()
 
     def _get_cursor_region_data(self):
