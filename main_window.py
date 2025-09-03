@@ -129,6 +129,33 @@ class DataAnalysisApp(QMainWindow, UiSetupMixin, AnalysisMixin):
         self.roi_xmax_spin.valueChanged.connect(self.on_roi_spinbox_changed)
 
 
+    def plot_fit_results(self, x_data, y_data_original, y_data_fitted, title):
+        """通用绘图函数，用于显示高级拟合的结果。"""
+        # 准备绘图区
+        ax = self._prepare_single_axis_plot(x_data, {'original': y_data_original, 'fitted': y_data_fitted})
+        
+        # 将原始数据绘制为散点以便观察
+        line_orig, = ax.plot(x_data[::self.sample_spin.value()], y_data_original[::self.sample_spin.value()], 
+                               'o', markersize=3, label="原始数据")
+        
+        # 将拟合数据绘制为实线
+        line_fit, = ax.plot(x_data[::self.sample_spin.value()], y_data_fitted[::self.sample_spin.value()], 
+                              '-', linewidth=2, color='red', label="拟合曲线")
+        
+        # 存储绘图轨迹信息
+        self.plotted_traces.append({'name': "原始数据", 'lines': [line_orig], 'type': 'single'})
+        self.plotted_traces.append({'name': "拟合曲线", 'lines': [line_fit], 'type': 'single'})
+
+        # 为光标功能设置数据
+        self.cursor_plot_data = {'x': x_data, 'y_cols': {"原始数据": y_data_original}}
+
+        # 完善绘图细节
+        ax.set_title(title)
+        ax.set_xlabel(self.x_axis_combo.currentText())
+        ax.set_ylabel(self.y_axis_combo.currentText())
+        ax.legend()
+        self._finalize_plot(ax)
+
     def _get_bode_data_from_ui(self):
         """从UI获取并验证用于伯德图分析的数据。"""
         mode = self.bode_col_select_mode.currentText()
@@ -682,12 +709,29 @@ class DataAnalysisApp(QMainWindow, UiSetupMixin, AnalysisMixin):
     def remove_selected_files(self):
         selected_items = self.file_list.selectedItems() or ([self.file_list.currentItem()] if self.file_list.currentItem() else [])
         if not selected_items: return
+
+        # 1. 阻塞信号，防止在循环中触发不稳定的状态更新
+        self.file_list.blockSignals(True)
+
         for item in selected_items:
             self.loaded_files.pop(item.text(), None)
             self.file_list.takeItem(self.file_list.row(item))
+        
+        # 2. 解除阻塞
+        self.file_list.blockSignals(False)
+        
+        # 3. 手动触发一次状态更新，以反映删除后的结果
+        self.switch_file(self.file_list.currentRow())
     
     def remove_all_files(self):
-        self.loaded_files.clear(); self.file_list.clear(); self._clear_all_data()
+        # 同样使用阻塞信号的方式，确保操作的原子性和安全性
+        self.file_list.blockSignals(True)
+        self.loaded_files.clear()
+        self.file_list.clear()
+        self.file_list.blockSignals(False)
+        
+        # 操作完成后，手动调用一次清理函数
+        self._clear_all_data()
     
     def _clear_all_data(self):
         self.data, self.current_file = None, None
