@@ -8,8 +8,9 @@ import matplotlib.pyplot as plt
 import scipy.signal as signal
 from matplotlib.widgets import RectangleSelector
 
+### MODIFICATION START: Added missing QStyle import ###
 from PyQt5.QtWidgets import (
-    QMainWindow, QFileDialog, QMessageBox, QTableWidgetItem, QApplication, QHeaderView, QMenu
+    QMainWindow, QFileDialog, QMessageBox, QTableWidgetItem, QApplication, QHeaderView, QMenu, QStyle
 )
 from PyQt5.QtCore import Qt, QPoint
 from PyQt5.QtGui import QFont
@@ -25,61 +26,39 @@ from logic import buck_logic, pfc_boost_logic, llc_resonant_logic, control_logic
 class DataAnalysisApp(QMainWindow, UiSetupMixin, AnalysisMixin):
     def __init__(self):
         super().__init__()
-        # 建立对核心Qt应用和matplotlib的引用，以便Mixin类可以访问
         self.QApplication = QApplication.instance()
         self.plt = plt 
-
-        # --- 应用程序核心状态变量 ---
         self.data = None
         self.current_file = None
         self.loaded_files = {}
         self.last_table_df = None
-        self.plotted_traces = [] # 用于管理叠加绘图
-        self.current_bode_data = None # 新增：用于存储当前伯德图数据   
-
-        # --- 理论设计模块的状态变量 ---
+        self.plotted_traces = []
         self.compensator_results = {}
         self.current_compensator_tf = None
         self.current_plant_tf = None
         self.llc_gain_curve_data = None
-        
-        # --- 光标和绘图状态变量 ---
         self.v_cursor1, self.v_cursor2, self.h_cursor1, self.h_cursor2 = None, None, None, None
         self.active_cursor = None
         self.cursor_events_connected = False
         self.cursor_plot_data = {}
         self.full_x_limits, self.full_y_limits = None, None
         self.axis_limits_cid = None
-        
         self.RESULT_PLACEHOLDER_IDX = 0
         self.RESULT_TEXT_IDX = 1
         self.RESULT_TABLE_IDX = 2
-
         self.bode_tracker_annotations = []
         self.bode_tracker_connection_id = None
-
-        # --- ROI状态变量 ---
         self.analysis_roi = {'xmin': None, 'xmax': None}
         self.is_roi_selection_mode = False
         self.roi_selector = None
         self.roi_span = None
-
-        # 构建UI (来自UiSetupMixin)
         self.initUI()
-        
-        # 连接所有信号与槽
         self._connect_signals()
-        
-        # 设置按钮的初始状态
         self.on_multi_toggle()
         self._update_action_buttons_state()
-        
-        # 初始化结果显示区
         self.result_stack.setCurrentIndex(self.RESULT_PLACEHOLDER_IDX)
 
     def _connect_signals(self):
-        """集中连接所有UI控件的信号到对应的处理函数(槽)"""
-        # --- 主选项卡切换 ---
         self.main_tabs.currentChanged.connect(self._update_action_buttons_state)
         self.btn_open_files.clicked.connect(self.open_files)
         self.btn_open_folder.clicked.connect(self.open_folder)
@@ -99,6 +78,7 @@ class DataAnalysisApp(QMainWindow, UiSetupMixin, AnalysisMixin):
         self.btn_show_osc.clicked.connect(self.show_oscilloscope_view)
         self.no_header_check.stateChanged.connect(self.on_no_header_changed)
         self.bode_col_select_mode.currentIndexChanged.connect(self.on_bode_col_mode_change)
+        self.auto_detect_order_check.toggled.connect(self.on_auto_detect_toggled)
         self.btn_calc_buck.clicked.connect(self.on_calculate_buck)
         self.btn_overlay_buck_bode.clicked.connect(self.on_overlay_buck_bode)
         self.btn_send_buck_tf.clicked.connect(self.on_send_tf_to_compensator)
@@ -128,6 +108,10 @@ class DataAnalysisApp(QMainWindow, UiSetupMixin, AnalysisMixin):
         self.roi_xmin_spin.valueChanged.connect(self.on_roi_spinbox_changed)
         self.roi_xmax_spin.valueChanged.connect(self.on_roi_spinbox_changed)
 
+    def on_auto_detect_toggled(self, checked):
+        """当“自动检测阶数”复选框状态改变时，禁用或启用手动输入框。"""
+        self.fit_zeros_spin.setEnabled(not checked)
+        self.fit_poles_spin.setEnabled(not checked)
 
     def plot_fit_results(self, x_data, y_data_original, y_data_fitted, title):
         """通用绘图函数，用于显示高级拟合的结果。"""
