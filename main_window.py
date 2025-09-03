@@ -759,6 +759,21 @@ class DataAnalysisApp(QMainWindow, UiSetupMixin, AnalysisMixin):
                 self.bode_freq_combo.setCurrentIndex(0); self.bode_gain_combo.setCurrentIndex(1); self.bode_phase_combo.setCurrentIndex(2)
         self.refresh_multi_column_list()
 
+    def align_numeric_df(self, columns):
+        if self.data is None: return pd.DataFrame()
+        df = self.data.copy()
+        if self.roi_enable_check.isChecked():
+            xmin, xmax, x_col = self.analysis_roi.get('xmin'), self.analysis_roi.get('xmax'), self.x_axis_combo.currentText()
+            if x_col in df.columns and xmin is not None and xmax is not None and xmax > xmin:
+                try: df = df[pd.to_numeric(df[x_col], errors='coerce').between(xmin, xmax)]
+                except Exception as e: print(f"Warning: Could not apply ROI filter. Error: {e}")
+        unique_columns = list(dict.fromkeys(columns))
+        valid_cols = [c for c in unique_columns if c in df.columns]
+        if not valid_cols: return pd.DataFrame()
+        df_subset = df[valid_cols].copy()
+        for c in valid_cols: df_subset[c] = pd.to_numeric(df_subset[c], errors='coerce')
+        return df_subset.dropna(how='any').astype(float)
+
     def update_transient_params_visibility(self):
         is_band = (self.transient_method_combo.currentText() == "带宽法")
         self.transient_band_label.setVisible(is_band); self.transient_band_spin.setVisible(is_band)
