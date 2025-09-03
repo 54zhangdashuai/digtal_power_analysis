@@ -78,6 +78,7 @@ class DataAnalysisApp(QMainWindow, UiSetupMixin, AnalysisMixin):
         self.btn_show_osc.clicked.connect(self.show_oscilloscope_view)
         self.no_header_check.stateChanged.connect(self.on_no_header_changed)
         self.bode_col_select_mode.currentIndexChanged.connect(self.on_bode_col_mode_change)
+        # 核心修改：连接新的复选框信号
         self.auto_detect_order_check.toggled.connect(self.on_auto_detect_toggled)
         self.btn_calc_buck.clicked.connect(self.on_calculate_buck)
         self.btn_overlay_buck_bode.clicked.connect(self.on_overlay_buck_bode)

@@ -65,31 +65,32 @@ class AnalysisMixin:
 
     def _calculate_bode_metrics(self, freq, mag, phase):
         metrics = {'pm': np.nan, 'gm': np.nan, 'wc_gc': None, 'wc_pc': None, 'bw': None, 'mr': np.nan}
+        
+        # 新增：如果数据点过少，直接返回空结果，避免后续计算出错
+        if len(freq) < 2:
+            print("Warning: Not enough data points to calculate Bode metrics.")
+            return metrics
+            
         try:
             if np.any(mag < 0) and np.any(mag > 0):
                 crossings = np.where(np.diff(np.sign(mag)))[0]
                 if len(crossings) > 0:
                     idx = crossings[0]
                     f1, f2, m1, m2 = freq[idx], freq[idx+1], mag[idx], mag[idx+1]
-                    # 对数插值以提高精度
                     metrics['wc_gc'] = f1 * (f2/f1)**(-m1/(m2-m1))
                     phase_at_gc = np.interp(metrics['wc_gc'], freq, phase)
                     metrics['pm'] = 180 + phase_at_gc
             
-            # 改进相位穿越频率的查找，处理相位包裹问题
             phase_shifted_pos = np.unwrap(np.deg2rad(phase)) * 180 / np.pi
             phase_cross_val = -180
             
-            # 寻找所有穿越-180度的点
             crossings = np.where(np.diff(np.sign(phase_shifted_pos - phase_cross_val)))[0]
             
             if len(crossings) > 0:
-                # 通常我们关心的是第一个（最低频率）的穿越点
                 idx = crossings[0]
                 p1, p2 = phase_shifted_pos[idx], phase_shifted_pos[idx+1]
                 f1, f2 = freq[idx], freq[idx+1]
                 
-                # 线性插值找到穿越频率
                 metrics['wc_pc'] = f1 + (phase_cross_val - p1) * (f2 - f1) / (p2 - p1)
                 mag_at_pc = np.interp(metrics['wc_pc'], freq, mag)
                 metrics['gm'] = -mag_at_pc
@@ -99,7 +100,8 @@ class AnalysisMixin:
                 bw_candidates = freq[np.where(mag < (dc_gain-3))[0]]
                 if len(bw_candidates)>0: metrics['bw'] = bw_candidates[0]
             if np.max(mag) > dc_gain: metrics['mr'] = np.max(mag)
-        except Exception as e: print(f"无法计算所有伯德图指标: {e}")
+        except Exception as e: 
+            print(f"无法计算所有伯德图指标: {e}")
         return metrics
 
     ### MODIFICATION START: Fitter upgraded to a multi-model dispatcher ###

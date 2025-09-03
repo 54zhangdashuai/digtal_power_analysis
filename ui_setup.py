@@ -64,21 +64,19 @@ class UiSetupMixin:
         self.fitting_group.setCheckable(True)
         self.fitting_group.setChecked(False)
         
-        ### MODIFICATION START: Replace button with a checkbox ###
         fit_layout = QFormLayout(self.fitting_group)
         fit_layout.setContentsMargins(5, 10, 5, 10)
         
-        # New checkbox to enable/disable auto-detection
+        # 新的复选框
         self.auto_detect_order_check = QCheckBox("自动检测阶数")
         self.auto_detect_order_check.setToolTip("勾选后，点击“执行分析”将自动检测阶数并拟合")
-        self.auto_detect_order_check.setChecked(True) # Default to being checked
+        self.auto_detect_order_check.setChecked(True)
         fit_layout.addRow(self.auto_detect_order_check)
 
         self.fit_zeros_spin = QSpinBox(); self.fit_zeros_spin.setRange(0, 10)
         self.fit_poles_spin = QSpinBox(); self.fit_poles_spin.setRange(1, 10); self.fit_poles_spin.setValue(2)
         fit_layout.addRow("零点数量:", self.fit_zeros_spin)
         fit_layout.addRow("极点数量:", self.fit_poles_spin)
-        ### MODIFICATION END ###
 
         main_layout.addWidget(self.fitting_group)
         main_layout.addStretch()

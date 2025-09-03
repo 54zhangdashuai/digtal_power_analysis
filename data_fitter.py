@@ -22,6 +22,10 @@ class DataFitter:
 
     def fit_linear(self):
         """执行标准线性回归。"""
+        # 新增：检查数据点是否足够
+        if len(self.x_data) < 2:
+            return {'error': '线性拟合需要至少2个数据点。', 'slope': np.nan, 'intercept': np.nan, 'r_squared': np.nan, 'coeffs': []}
+            
         coeffs = np.polyfit(self.x_data, self.y_data, 1)
         slope, intercept = coeffs
         y_predicted = np.polyval(coeffs, self.x_data)
@@ -30,6 +34,13 @@ class DataFitter:
 
     def fit_polynomial(self, degree):
         """执行多项式回归。"""
+        # 新增：检查数据点是否足够
+        if len(self.x_data) < degree + 1:
+            return {
+                'error': f'进行{degree}阶多项式拟合至少需要 {degree + 1} 个数据点，当前只有 {len(self.x_data)} 个。',
+                'coefficients': [], 'r_squared': np.nan, 'coeffs': []
+            }
+
         coeffs = np.polyfit(self.x_data, self.y_data, degree)
         y_predicted = np.polyval(coeffs, self.x_data)
         r2 = r2_score(self.y_data, y_predicted)
@@ -56,11 +67,18 @@ class DataFitter:
         """
         使用复合模型直接拟合带有趋势的振荡信号，并包含智能初始值猜测。
         """
+        n = len(self.y_data)
+        # 新增：检查数据点数量
+        if n < 10:  # 对于复杂模型，需要更多的数据点
+            return {'error': '趋势振荡拟合需要至少10个数据点。'}
+
         try:
-            n = len(self.y_data)
-            dt = np.mean(np.diff(self.x_data))
-            if dt == 0:
-                dt = (self.x_data[-1] - self.x_data[0]) / n if n > 1 else 1
+            # 新增：更稳健的时间间隔dt计算
+            dt = np.mean(np.diff(self.x_data)) if n > 1 else 0
+            if not np.isfinite(dt) or dt <= 0:
+                dt = (self.x_data[-1] - self.x_data[0]) / (n - 1) if n > 1 else 0
+                if not np.isfinite(dt) or dt <= 0:
+                        return {'error': '无法从X轴数据中确定有效的时间间隔(dt)。'}
 
             yf = np.fft.fft(self.y_data)
             xf = np.fft.fftfreq(n, dt)[:n//2]
